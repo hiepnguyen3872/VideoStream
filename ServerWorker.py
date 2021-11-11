@@ -65,14 +65,16 @@ class ServerWorker:
 				print("processing SETUP\n")
 				try:
 					self.clientInfo['videoStream'] = VideoStream(filename)
+					self.total_time = self.clientInfo['videoStream'].get_total_time()
 					self.state = self.READY
 				except IOError:
 					self.replyRtsp(self.FILE_NOT_FOUND_404, seq[1])
 
 				# Generate a randomized RTSP session ID
 				self.clientInfo['session'] = randint(100000, 999999)
-
+				
 				# Send RTSP reply
+				self.requestType = requestType
 				self.replyRtsp(self.OK_200, seq[1])
 				# Get the RTP/UDP port from the last line
 				self.clientInfo['rtpPort'] = request[2].split(' ')[3]
@@ -91,6 +93,7 @@ class ServerWorker:
 				self.clientInfo['event'] = threading.Event()
 				self.clientInfo['worker']= threading.Thread(target=self.sendRtp) 
 				self.clientInfo['worker'].start()
+				self.requestType = requestType
 		
 		# Process PAUSE request
 		elif requestType == self.PAUSE:
@@ -101,7 +104,7 @@ class ServerWorker:
 				self.clientInfo['event'].set()
 			
 				self.replyRtsp(self.OK_200, seq[1])
-		
+				self.requestType = requestType
 		# Process TEARDOWN request
 		elif requestType == self.TEARDOWN:
 			print("processing TEARDOWN\n")
@@ -112,30 +115,33 @@ class ServerWorker:
 			
 			# Close the RTP socket
 			self.clientInfo['rtpSocket'].close()
-
+			self.requestType = requestType
 
 		elif requestType == self.FASTFORWARD: 
 			 print("processing FASTFORWARD\n")
 			 self.clientInfo['videoStream'].fastForward()
 			 self.replyRtsp(self.OK_200, seq[1])
-
+			 self.requestType = requestType
 
 		elif requestType == self.BACKWARD: 
 			 print("processing BACKWARD\n")
 			 self.clientInfo['videoStream'].fastBackward()
 			 self.replyRtsp(self.OK_200, seq[1])	
+			 self.requestType = requestType
 
 		elif requestType == self.SWITCH: 
 			self.state = self.READY
 			self.clientInfo['event'].set()
 			try:
 				self.clientInfo['videoStream'] = VideoStream(filename)
+				self.total_time = self.clientInfo['videoStream'].get_total_time()
 				self.state = self.READY
 			except IOError:
-				self.replyRtsp(self.FILE_NOT_FOUND_404, seq[1])
+				self.replyRtsp(self.FILE_NOT_FOUND_404, seq[1] + '\nTotaltime: ' + str(self.total_time) )
 			# Generate a randomized RTSP session ID
 			# self.clientInfo['session'] = randint(100000, 999999)
 			# Send RTSP reply
+			self.requestType = requestType
 			self.replyRtsp(self.OK_200, seq[1])
 			# Get the RTP/UDP port from the last line
 			# self.clientInfo['rtpPort'] = request[2].split(' ')[3]
@@ -184,7 +190,9 @@ class ServerWorker:
 		"""Send RTSP reply to the client."""
 		if code == self.OK_200:
 			print("200 OK")
-			reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session'])
+			reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session']) 
+			if self.requestType == self.SETUP or self.requestType == self.SWITCH: 
+				reply = reply + '\nTotalTimeMovie: ' + str(self.total_time)
 			connSocket = self.clientInfo['rtspSocket'][0]
 			connSocket.send(reply.encode())
 		

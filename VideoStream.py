@@ -10,19 +10,20 @@ class VideoStream:
 		self.idx = 0
 		self.fast_forward = 0
 		self.fast_backward = 0
-		# while True: 
-		# 	data = self.file.read(5)
-		# 	if data: 
-		# 		framelength = int(data)
-		# 		data = self.file.read(framelength)
-		# 		self.frameIdx.append(framelength)
-		# 	else: 
-		# 		break
-		# self.file.seek(0, 0)
+		
+		while True: 
+			data = self.file.read(5)
+			if data: 
+				framelength = int(data)
+				data = self.file.read(framelength)
+				self.frameIdx.append(framelength)
+			else: 
+				break
+		self.file.seek(0, 0)
 	
 
 	def get_total_time(self): 
-		return 0.04*len(self.frameIdx)
+		return int(0.04*len(self.frameIdx))
 
 	
 	def fastForward(self): 

@@ -249,6 +249,7 @@ class Client:
 					remainTime = int(currFrameNbr*0.04)	
 					remainTime = time.strftime('%H:%M:%S', time.gmtime(remainTime))				
 					self.remainTimeLabel.config(text="Remain time: "+remainTime)
+					self.totalTimeLabel.config(text="Total time: "+time.strftime('%H:%M:%S', time.gmtime(self.total_time)))
 					# if currFrameNbr > self.frameNbr: # Discard the late packet
 
 					self.frameNbr = currFrameNbr
@@ -410,6 +411,7 @@ class Client:
 			request = 'SWITCH ' + self.listMovie.get() + '.Mjpeg' + ' RTSP/1.0\nCSeq: ' + str(self.rtspSeq) + '\nSession: ' + str(self.sessionId)
 			# Keep track of the sent request.
 			self.requestSent = self.SWITCH
+			os.remove(CACHE_FILE_NAME + str(self.sessionId) + CACHE_FILE_EXT)
 		
 		else:
 
@@ -493,7 +495,7 @@ class Client:
 						self.state = self.READY
 
 						# Open RTP port.
-
+						self.total_time = int(lines[-1].split(' ')[1])
 						self.openRtpPort()
 
 					elif self.requestSent == self.PLAY:
@@ -513,7 +515,7 @@ class Client:
 						self.state = self.READY
 
 						# The play thread exits. A new thread is created on resume.
-
+						self.total_time = int(lines[-1].split(' ')[1])
 						self.playEvent.set()
 
 					elif self.requestSent == self.TEARDOWN:
