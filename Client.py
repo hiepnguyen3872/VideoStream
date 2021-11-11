@@ -9,7 +9,9 @@ import time
 
 from RtpPacket import RtpPacket
 
-
+import sys
+# from time import time
+import datetime
 
 CACHE_FILE_NAME = "cache-"
 
@@ -43,6 +45,12 @@ class Client:
 
 	SWITCH = 6
 
+	DESCRIBE = 7
+
+	total_frame = 0
+
+	#=====================
+	sum_size_packet = 0
 	
 
 	# Initiation..
@@ -127,6 +135,12 @@ class Client:
 
 		self.teardown.grid(row=2, column=3, padx=2, pady=2)
 
+		# Create Describe button
+		self.Describe = Button(self.master, width=20, padx=3, pady=3)
+		self.Describe["text"] = "Describe"
+		self.Describe["command"] =  self.describe
+		self.Describe.grid(row=3, column=0, padx=2, pady=2)
+
 		# fast forward button 
 		self.forward = Button(self.master, width=20, padx=3, pady=3)
 		self.forward["text"] = "Forward"
@@ -196,7 +210,13 @@ class Client:
 
 			self.sendRtspRequest(self.PAUSE)
 
-	
+	def describe(self):
+		"""Describe."""
+		# if self.state == self.PLAYING:
+		self.sendRtspRequest(self.DESCRIBE)
+		
+		# self.master.destroy() # Close the gui window
+		# os.remove(CACHE_FILE_NAME + str(self.sessionId) + CACHE_FILE_EXT) # Delete the cache image from video
 
 	def playMovie(self):
 
@@ -236,23 +256,27 @@ class Client:
 			try:
 				data = self.rtpSocket.recv(20480)
 				if data:
+					print ("size = " + str (sys.getsizeof(data)) + "\n")
 					rtpPacket = RtpPacket()
-
 					rtpPacket.decode(data)
-
-					
-
+					self.curr_rtpPck = rtpPacket
 					currFrameNbr = rtpPacket.seqNum()
+					self.total_frame = rtpPacket.seqNum()
 
 					print("Current Seq Num: " + str(currFrameNbr))
-
 					remainTime = int(currFrameNbr*0.04)	
-					remainTime = time.strftime('%H:%M:%S', time.gmtime(remainTime))				
+					remainTime = time.strftime('%H:%M:%S', time.gmtime(remainTime))			
 					self.remainTimeLabel.config(text="Remain time: "+remainTime)
 					self.totalTimeLabel.config(text="Total time: "+time.strftime('%H:%M:%S', time.gmtime(self.total_time)))
 					# if currFrameNbr > self.frameNbr: # Discard the late packet
 
-					self.frameNbr = currFrameNbr
+					if currFrameNbr > self.frameNbr: # Discard the late packet
+						self.sum_size_packet += sys.getsizeof(data)
+						print ("Current Seq Num in if: " + str(currFrameNbr))
+						print ("dsize / dt = " + str(sys.getsizeof(data) / 0.05 / 1024) + " KB/s")
+						#--------------------------------------------------------
+						self.frameNbr = currFrameNbr
+# 						self.updateMovie(self.writeFrame(rtpPacket.getPayload()))
 
 					self.updateMovie(self.writeFrame(rtpPacket.getPayload()))
 
@@ -292,8 +316,6 @@ class Client:
 
 		file.close()
 
-		
-
 		return cachename
 
 	
@@ -301,11 +323,8 @@ class Client:
 	def updateMovie(self, imageFile):
 
 		"""Update the image file as video frame in the GUI."""
-
 		photo = ImageTk.PhotoImage(Image.open(imageFile))
-
 		self.label.configure(image = photo, height=288) 
-
 		self.label.image = photo
 
 		
@@ -412,7 +431,12 @@ class Client:
 			# Keep track of the sent request.
 			self.requestSent = self.SWITCH
 			os.remove(CACHE_FILE_NAME + str(self.sessionId) + CACHE_FILE_EXT)
-		
+
+
+		elif requestCode == self.DESCRIBE: 
+			self.rtspSeq += 1
+			request = 'DESCRIBE ' + self.fileName + ' RTSP/1.0\nCSeq: ' + str(self.rtspSeq) + '\nSession: ' + str(self.sessionId)
+			self.requestSent = self.DESCRIBE
 		else:
 
 			return
@@ -437,16 +461,23 @@ class Client:
 
 			reply = self.rtspSocket.recv(1024)
 
-			
-
 			if reply: 
-
 				self.parseRtspReply(reply)
 
-			
+				#============================
+				if self.requestSent == self.DESCRIBE:
+					# print(self.curr_rtpPck)
+					print ("describe: " + str(self.curr_rtpPck.seqNum()))
+					print ("version: " + str(self.curr_rtpPck.version()))
+					print ("PT: " + str(self.curr_rtpPck.payloadType()))
+					print ("sequent number " + str(self.curr_rtpPck.seqNum()))
+					# print ()
 
+					timestamp = datetime.datetime.fromtimestamp(self.curr_rtpPck.timestamp())
+					print ("Time: " + timestamp.strftime('%Y-%m-%d %H:%M:%S'))
+					print ("SSRC: " + str(self.curr_rtpPck.getSSRC()))
+     
 			# Close the RTSP socket upon requesting Teardown
-
 			if self.requestSent == self.TEARDOWN:
 
 				self.rtspSocket.shutdown(socket.SHUT_RDWR)
@@ -475,15 +506,10 @@ class Client:
 			session = int(lines[2].split(' ')[1])
 
 			# New RTSP session ID
-
 			if self.sessionId == 0:
-
 				self.sessionId = session
 
-			
-
 			# Process only if the session ID is the same
-
 			if self.sessionId == session:
 
 				if int(lines[0].split(' ')[1]) == 200: 
@@ -503,11 +529,12 @@ class Client:
 						self.state = self.PLAYING
 
 					elif self.requestSent == self.PAUSE:
-
 						self.state = self.READY
-
+						print ("Sum of frames " + lines[3] + "\n")
+						# print (str(int(lines[3])/self.total_frame * 100) + " %")
+						print ("Loss rate: " + str( 100.0 - float(lines[3])/self.total_frame * 100) + " %")
+						print ("data rate average = " + str(self.sum_size_packet / (self.total_frame * 0.05) / 1024) + " KB/s")
 						# The play thread exits. A new thread is created on resume.
-
 						self.playEvent.set()
 					
 					elif self.requestSent == self.SWITCH:
@@ -517,7 +544,42 @@ class Client:
 						# The play thread exits. A new thread is created on resume.
 						self.total_time = int(lines[-1].split(' ')[1])
 						self.playEvent.set()
+					
+					elif self.requestSent == self.DESCRIBE:
+						self.state = self.READY
+						print ("Sum of frames " + lines[3] + "\n")
+						# print (str(int(lines[3])/self.total_frame * 100) + " %")
+						print ("Loss rate: " + str( 100.0 - float(lines[3])/self.total_frame * 100) + " %")
+						print ("data rate average = " + str(self.sum_size_packet / (self.total_frame * 0.05) / 1024) + " KB/s")
+						# The play thread exits. A new thread is created on resume.
+						self.playEvent.set()
+						self.state = self.READY
 
+					# 	# Open RTP port.
+					# 	self.openRtpPort()
+
+					# elif self.requestSent == self.PLAY:
+					# 	self.state = self.PLAYING
+
+					# elif self.requestSent == self.PAUSE:
+					# 	self.state = self.READY
+					# 	print ("Sum of frames " + lines[3] + "\n")
+					# 	# print (str(int(lines[3])/self.total_frame * 100) + " %")
+					# 	print ("Loss rate: " + str( 100.0 - float(lines[3])/self.total_frame * 100) + " %")
+					# 	print ("data rate average = " + str(self.sum_size_packet / (self.total_frame * 0.05) / 1024) + " KB/s")
+					# 	# The play thread exits. A new thread is created on resume.
+					# 	self.playEvent.set()
+
+					# elif self.requestSent == self.DESCRIBE:
+					# 	self.state = self.READY
+					# 	print ("Sum of frames " + lines[3] + "\n")
+					# 	# print (str(int(lines[3])/self.total_frame * 100) + " %")
+					# 	print ("Loss rate: " + str( 100.0 - float(lines[3])/self.total_frame * 100) + " %")
+					# 	print ("data rate average = " + str(self.sum_size_packet / (self.total_frame * 0.05) / 1024) + " KB/s")
+					# 	# The play thread exits. A new thread is created on resume.
+					# 	self.playEvent.set()
+      
+      
 					elif self.requestSent == self.TEARDOWN:
 
 						self.state = self.INIT
@@ -525,33 +587,31 @@ class Client:
 						# Flag the teardownAcked to close the socket.
 
 						self.teardownAcked = 1 
+						print ("Sum of frames " + lines[3] + "\n")
+						print ("Loss rate: " + str( 100.0 - float(lines[3])/self.total_frame * 100) + " %")
+						print ("data rate average = " + str(self.sum_size_packet / (self.total_frame * 0.05) / 1024) + " KB/s")
+      
 
 	
 
 	def openRtpPort(self):
-
 		"""Open RTP socket binded to a specified port."""
 
 		# Create a new datagram socket to receive RTP packets from the server
 
 		self.rtpSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-
-
 		# Set the timeout value of the socket to 0.5sec
 
-		self.rtpSocket.settimeout(0.000005)
-
-		
+		self.rtpSocket.settimeout(0.5)
 
 		try:
-
 			# Bind the socket to the address using the RTP port given by the client user
 
 			self.rtpSocket.bind(("", self.rtpPort))
 
 		except:
-
+			# tkMessageBox.showwarning('Unable to Bind', 'Unable to bind PORT=%d' %self.rtpPort)
 			tkMessageBox.showwarning('Unable to Bind', 'Unable to bind PORT=%d' %self.rtpPort)
 
 

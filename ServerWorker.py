@@ -3,6 +3,7 @@ import sys, traceback, threading, socket
 
 from VideoStream import VideoStream
 from RtpPacket import RtpPacket
+import random
 
 class ServerWorker:
 	SETUP = 'SETUP'
@@ -13,6 +14,9 @@ class ServerWorker:
 	BACKWARD = 'BACKWARD'
 	SWITCH = 'SWITCH'
 
+	DESCRIBE = 'DESCRIBE'
+	count_loss = 0	
+ 
 	INIT = 0
 	READY = 1
 	PLAYING = 2
@@ -28,6 +32,7 @@ class ServerWorker:
 	
 	def __init__(self, clientInfo):
 		self.clientInfo = clientInfo
+		self.count_loss = 0	
 		self.listStringMovies = " "
 		for movie in self.listMovies:
 			self.listStringMovies += movie
@@ -42,7 +47,7 @@ class ServerWorker:
 		while True:            
 			data = connSocket.recv(256)
 			if data:
-				print("Data received:\n" + data.decode())
+				print ("Data received:\n" + data.decode() + "\n\tSize: " + str (sys.getsizeof(data.decode()))  + "\n")
 				self.processRtspRequest(data)
 	
 	def processRtspRequest(self, data):
@@ -56,8 +61,7 @@ class ServerWorker:
 		filename = line1[1]
 		
 		# Get the RTSP sequence number 
-		seq = request[1].split(' ')
-		
+		seq = request[1].split(' ')		
 		# Process SETUP request
 		if requestType == self.SETUP:
 			if self.state == self.INIT:
@@ -94,11 +98,22 @@ class ServerWorker:
 				self.clientInfo['worker']= threading.Thread(target=self.sendRtp) 
 				self.clientInfo['worker'].start()
 				self.requestType = requestType
-		
+
+		# Process DESCRIBE request 		
+		elif requestType == self.DESCRIBE:
+			if self.state == self.PLAYING:
+				print ("processing DESCRIBE\tSum frame:\t" + str(self.count_loss) + "\n")
+				self.state = self.READY
+			
+				self.clientInfo['event'].set()
+
+			self.replyRtsp(self.OK_200, seq[1])
+			self.requestType = requestType
+
 		# Process PAUSE request
 		elif requestType == self.PAUSE:
 			if self.state == self.PLAYING:
-				print("processing PAUSE\n")
+				print ("processing PAUSE\tSum frame:\t" + str(self.count_loss) + "\n")
 				self.state = self.READY
 				
 				self.clientInfo['event'].set()
@@ -108,6 +123,32 @@ class ServerWorker:
 		# Process TEARDOWN request
 		elif requestType == self.TEARDOWN:
 			print("processing TEARDOWN\n")
+		
+		# # Process DESCRIBE request 		
+		# elif requestType == self.DESCRIBE:
+		# 	# if self.state == self.PLAYING:
+		# 	print ("processing DESCRIBE\tSum frame:\t" + str(self.count_loss) + "\n")
+		# 	self.state = self.READY
+			
+		# 	self.clientInfo['event'].set()
+
+		# 	self.replyRtsp(self.OK_200, seq[1])
+    
+		# Process PAUSE request
+		# elif requestType == self.PAUSE:
+		# 	if self.state == self.PLAYING:
+		# 		print ("processing PAUSE\tSum frame:\t" + str(self.count_loss) + "\n")
+		# 		self.state = self.READY
+				
+		# 		self.clientInfo['event'].set()
+
+		# 		# print ()
+    
+		# 		self.replyRtsp(self.OK_200, seq[1])
+		
+		# # Process TEARDOWN request
+		# elif requestType == self.TEARDOWN:
+		# 	print ("processing TEARDOWN\n")
 
 			self.clientInfo['event'].set()
 			
@@ -152,6 +193,11 @@ class ServerWorker:
 		while True:
 			self.clientInfo['event'].wait(0.04) 
 			
+	# def sendRtp(self):				# 	run when play
+	# 	"""Send RTP packets over UDP."""
+	# 	while True:
+	# 		self.clientInfo['event'].wait(0.05) 
+			
 			# Stop sending if request is PAUSE or TEARDOWN
 			if self.clientInfo['event'].isSet(): 
 				break 
@@ -162,9 +208,11 @@ class ServerWorker:
 				try:
 					address = self.clientInfo['rtspSocket'][1][0]
 					port = int(self.clientInfo['rtpPort'])
+					print ("current frame number: " + str(frameNumber))
+					self.count_loss = frameNumber
 					self.clientInfo['rtpSocket'].sendto(self.makeRtp(data, frameNumber),(address,port))
 				except:
-					print("Connection Error")
+					print ("Connection Error")
 					#print '-'*60
 					#traceback.print_exc(file=sys.stdout)
 					#print '-'*60
@@ -178,7 +226,9 @@ class ServerWorker:
 		marker = 0
 		pt = 26 # MJPEG type
 		seqnum = frameNbr
-		ssrc = 0 
+		ssrc = abs(randint(0, 2**32 - 1))
+		# ssrc = 0
+		# print (ssrc)
 		
 		rtpPacket = RtpPacket()
 		
@@ -190,7 +240,7 @@ class ServerWorker:
 		"""Send RTSP reply to the client."""
 		if code == self.OK_200:
 			print("200 OK")
-			reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session']) 
+			reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session']) + '\n' + str(self.count_loss) 
 			if self.requestType == self.SETUP or self.requestType == self.SWITCH: 
 				reply = reply + '\nTotalTimeMovie: ' + str(self.total_time)
 			connSocket = self.clientInfo['rtspSocket'][0]
@@ -201,3 +251,13 @@ class ServerWorker:
 			print("404 NOT FOUND")
 		elif code == self.CON_ERR_500:
 			print("500 CONNECTION ERROR")
+			#print "200 OK"
+		# 	reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session']) + '\n' + str(self.count_loss)
+		# 	connSocket = self.clientInfo['rtspSocket'][0]
+		# 	connSocket.send(reply.encode())
+			
+		# # Error messages
+		# elif code == self.FILE_NOT_FOUND_404:
+		# 	print ("404 NOT FOUND")
+		# elif code == self.CON_ERR_500:
+		# 	print ("500 CONNECTION ERROR")

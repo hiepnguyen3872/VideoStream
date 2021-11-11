@@ -72,6 +72,10 @@ class RtpPacket:
 		"""Return payload."""
 		return self.payload
 		
+	def getSSRC(self):
+		"""Return SSRC."""
+		ssrc = self.header[8] << 24 | self.header[9] << 16 | self.header[10] << 8 | self.header[11]
+		return int(ssrc)
 	def getPacket(self):
 		"""Return RTP packet."""
 		return self.header + self.payload
